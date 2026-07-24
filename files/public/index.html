@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pagecheck — URL Audit Console</title>
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0a0e17;
+    --panel: #111827;
+    --panel-line: #1f2b42;
+    --text: #dfe6f2;
+    --muted: #6b7690;
+    --accent: #35e0a1;
+    --accent-dim: #1f6b4f;
+    --warn: #f5b656;
+    --bad: #ff6b6b;
+    --mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+    --sans: 'Inter', -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    background-image:
+      linear-gradient(var(--panel-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--panel-line) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: -1px -1px;
+  }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 56px 24px 100px;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 28px;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+
+  .sub {
+    color: var(--muted);
+    font-size: 14.5px;
+    margin: 0 0 36px;
+    line-height: 1.5;
+  }
+
+  form {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 14px 16px;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+
+  input[type="text"]::placeholder { color: var(--muted); }
+
+  input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+
+  button {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--accent);
+    color: #04140d;
+    border: none;
+    padding: 0 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.05s ease;
+  }
+
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .hint {
+    color: var(--muted);
+    font-size: 12.5px;
+    font-family: var(--mono);
+    min-height: 18px;
+    margin-bottom: 28px;
+  }
+
+  /* Scan sweep, shown while a request is in flight */
+  .scanline {
+    position: relative;
+    height: 2px;
+    width: 100%;
+    background: var(--panel-line);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: -18px 0 28px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .scanline.active { opacity: 1; }
+  .scanline::after {
+    content: '';
+    position: absolute;
+    top: 0; left: -40%;
+    width: 40%; height: 100%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: sweep 1.1s linear infinite;
+  }
+  @keyframes sweep {
+    from { left: -40%; }
+    to { left: 100%; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 10px;
+    overflow: hidden;
+    display: none;
+  }
+  .panel.show { display: block; }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--panel-line);
+    flex-wrap: wrap;
+  }
+
+  .panel-head .url {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    word-break: break-all;
+  }
+
+  .status-chip {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status-chip.ok { background: rgba(53,224,161,0.12); color: var(--accent); }
+  .status-chip.warn { background: rgba(245,182,86,0.12); color: var(--warn); }
+  .status-chip.bad { background: rgba(255,107,107,0.12); color: var(--bad); }
+
+  .status-chip .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor;
+  }
+
+  .error-banner {
+    margin: 18px 20px 0;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: rgba(255,107,107,0.08);
+    border: 1px solid rgba(255,107,107,0.35);
+    color: var(--bad);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+
+  .meta-block {
+    padding: 20px 20px 4px;
+    border-bottom: 1px solid var(--panel-line);
+  }
+  .meta-row { margin-bottom: 14px; }
+  .meta-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .meta-value {
+    font-size: 14.5px;
+    line-height: 1.45;
+  }
+  .meta-value.mono { font-family: var(--mono); font-size: 13px; }
+  .meta-value.empty { color: var(--muted); font-style: italic; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--panel-line);
+  }
+
+  .metric {
+    background: var(--panel);
+    padding: 18px 20px;
+  }
+
+  .metric-value {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .metric-value.warn { color: var(--warn); }
+  .metric-value.bad { color: var(--bad); }
+  .metric-value.ok { color: var(--accent); }
+
+  .metric-label {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  footer {
+    margin-top: 40px;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: var(--mono);
+    text-align: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scanline::after { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>URL audit console</h1>
+    <p class="sub">Enter a page URL to fetch it and read back status, load time, and a quick content check — title, meta description, headings, image alt coverage, and word count.</p>
+
+    <form id="audit-form">
+      <input
+        id="url-input"
+        type="text"
+        name="url"
+        placeholder="example.com/page"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="submit-btn" type="submit">Run audit</button>
+    </form>
+    <div class="hint" id="hint"></div>
+    <div class="scanline" id="scanline"></div>
+
+    <div class="panel" id="panel">
+      <div class="panel-head">
+        <span class="url" id="panel-url"></span>
+        <span class="status-chip" id="status-chip"><span class="dot"></span><span id="status-text"></span></span>
+      </div>
+
+      <div id="error-slot"></div>
+
+      <div class="meta-block" id="meta-block">
+        <div class="meta-row">
+          <div class="meta-label">Title</div>
+          <div class="meta-value" id="m-title"></div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-label">Meta description</div>
+          <div class="meta-value" id="m-desc"></div>
+        </div>
+      </div>
+
+      <div class="grid" id="metric-grid"></div>
+    </div>
+
+    <footer>fetches server-side · 10s timeout · no data stored</footer>
+  </div>
+
+<script>
+  const form = document.getElementById('audit-form');
+  const input = document.getElementById('url-input');
+  const btn = document.getElementById('submit-btn');
+  const hint = document.getElementById('hint');
+  const scanline = document.getElementById('scanline');
+  const panel = document.getElementById('panel');
+  const panelUrl = document.getElementById('panel-url');
+  const statusChip = document.getElementById('status-chip');
+  const statusText = document.getElementById('status-text');
+  const errorSlot = document.getElementById('error-slot');
+  const metaBlock = document.getElementById('meta-block');
+  const mTitle = document.getElementById('m-title');
+  const mDesc = document.getElementById('m-desc');
+  const metricGrid = document.getElementById('metric-grid');
+
+  function setLoading(isLoading) {
+    btn.disabled = isLoading;
+    input.disabled = isLoading;
+    btn.textContent = isLoading ? 'Scanning…' : 'Run audit';
+    scanline.classList.toggle('active', isLoading);
+  }
+
+  function metricTone(value, warnAt, badAt, higherIsWorse = true) {
+    if (badAt !== null && (higherIsWorse ? value >= badAt : value <= badAt)) return 'bad';
+    if (warnAt !== null && (higherIsWorse ? value >= warnAt : value <= warnAt)) return 'warn';
+    return 'ok';
+  }
+
+  function metricCard(value, label, tone) {
+    const el = document.createElement('div');
+    el.className = 'metric';
+    el.innerHTML = `<div class="metric-value ${tone || ''}">${value}</div><div class="metric-label">${label}</div>`;
+    return el;
+  }
+
+  function renderError(report, message) {
+    panel.classList.add('show');
+    panelUrl.textContent = report.finalUrl || report.requestedUrl || '';
+    errorSlot.innerHTML = `<div class="error-banner">${escapeHtml(message)}</div>`;
+    metaBlock.style.display = 'none';
+    metricGrid.innerHTML = '';
+
+    if (typeof report.status === 'number') {
+      setStatusChip(report.status);
+    } else {
+      statusChip.className = 'status-chip bad';
+      statusText.textContent = 'FAILED';
+    }
+
+    // Still show what we do know (status / timing) as metrics, if present
+    const cards = [];
+    if (typeof report.status === 'number') {
+      cards.push(metricCard(report.status, 'HTTP status', report.status >= 400 ? 'bad' : 'ok'));
+    }
+    if (typeof report.responseTimeMs === 'number' || typeof report.elapsedMs === 'number') {
+      const t = report.responseTimeMs ?? report.elapsedMs;
+      cards.push(metricCard(t + ' ms', 'Response time', metricTone(t, 1500, 4000)));
+    }
+    if (cards.length) {
+      metricGrid.style.display = 'grid';
+      cards.forEach(c => metricGrid.appendChild(c));
+    } else {
+      metricGrid.style.display = 'none';
+    }
+  }
+
+  function setStatusChip(status) {
+    let tone = 'ok';
+    if (status >= 500 || status === 0) tone = 'bad';
+    else if (status >= 400) tone = 'bad';
+    else if (status >= 300) tone = 'warn';
+    statusChip.className = 'status-chip ' + tone;
+    statusText.textContent = status ? ('HTTP ' + status) : 'FAILED';
+  }
+
+  function renderReport(report) {
+    panel.classList.add('show');
+    panelUrl.textContent = report.finalUrl || report.requestedUrl || '';
+    errorSlot.innerHTML = '';
+    metaBlock.style.display = 'block';
+    metricGrid.style.display = 'grid';
+
+    setStatusChip(report.status);
+
+    mTitle.textContent = report.title || '(none found)';
+    mTitle.className = 'meta-value' + (report.title ? '' : ' empty');
+
+    mDesc.textContent = report.metaDescription || '(none found)';
+    mDesc.className = 'meta-value' + (report.metaDescription ? '' : ' empty');
+
+    metricGrid.innerHTML = '';
+
+    metricGrid.appendChild(metricCard(
+      report.responseTimeMs + ' ms',
+      'Response time',
+      metricTone(report.responseTimeMs, 1500, 4000)
+    ));
+
+    metricGrid.appendChild(metricCard(
+      report.h1Count,
+      report.h1Count === 1 ? 'H1 heading' : 'H1 headings',
+      report.h1Count === 1 ? 'ok' : 'warn'
+    ));
+
+    const altTone = report.imagesMissingAlt === 0 ? 'ok' : metricTone(report.imagesMissingAlt, 1, 5);
+    metricGrid.appendChild(metricCard(
+      `${report.imagesMissingAlt} / ${report.imageCount}`,
+      'Images missing alt',
+      altTone
+    ));
+
+    metricGrid.appendChild(metricCard(
+      report.wordCount.toLocaleString(),
+      'Approx. word count',
+      'ok'
+    ));
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = input.value.trim();
+    if (!url) {
+      hint.textContent = 'Enter a URL first.';
+      return;
+    }
+
+    hint.textContent = '';
+    setLoading(true);
+    panel.classList.remove('show');
+
+    try {
+      const res = await fetch('/api/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      let report;
+      try {
+        report = await res.json();
+      } catch (parseErr) {
+        hint.textContent = 'Server returned an unreadable response. Please try again.';
+        setLoading(false);
+        return;
+      }
+
+      if (!res.ok) {
+        renderError(report, report.error || `Request failed with status ${res.status}.`);
+      } else if (report.error) {
+        renderError(report, report.error);
+      } else {
+        renderReport(report);
+      }
+    } catch (networkErr) {
+      hint.textContent = 'Could not reach the audit server. Check your connection and try again.';
+    } finally {
+      setLoading(false);
+    }
+  });
+</script>
+</body>
+</html>
